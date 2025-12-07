@@ -2,7 +2,7 @@
 
 A quick python script to emulate the proposed research protocol. 
 Inclusion criteria 
-- >18yo
+- >= 18yo
 - Severe acidemia within 48h ouf ICU admission
 - SOFA >= 4
 - Lactate >= 2
@@ -27,18 +27,18 @@ Use analyse.py to perform analysis.
 - Problem with ReprodICU where there are lots of labs with no patient_info and vice versa. See undefined_labs_problem_analysis.ipynb for details. 
 
 ## Current Cohort Flowchart
-356,849 Patients in Datasets
--> 8809 <18yo
--> 346,736 with no acidosis 
--> 279 with SOFA <4
--> 99 with Lactate <2
-926 Patiens included
--> 611 with respiratoy acidosis
--> 0 with ketosis
--> 69 with >1.5L Volume loss
--> 0 Patients with prior RRT 
--> 0 Patients with CKD, 5 Patiens with eGFR<30
-241 Patients used in analysis 
+356,849 Patients in Datasets<br>
+-> 8809 <18yo<br>
+-> 346,736 with no acidosis<br> 
+-> 279 with SOFA <4<br>
+-> 99 with Lactate <2<br>
+926 Patiens included<br>
+-> 611 with respiratoy acidosis<br>
+-> 0 with ketosis<br>
+-> 69 with >1.5L Volume loss<br>
+-> 0 Patients with prior RRT <br>
+-> 0 Patients with CKD, 5 Patiens with eGFR<30<br>
+241 Patients used in analysis <br>
 
 ## TODO : 
 - cohort size very small after selection of acidosis criteria ? is there an error ?
