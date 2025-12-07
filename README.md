@@ -24,7 +24,20 @@ Use analyse.py to perform analysis.
 - Ketones do not have a defined value
 - Volume Intake, Outtake function are unclear in inclusion 
 - RRT in diagnosis Frame do not have a Global ICU Stay ID. Imputing them with the Global Hospital Stay ID doesn't include all patients / shouldn't be a problem, since all patients with a ICU stay ID that fall into this case are eliminated.
--  
+
+## Current Cohort Flowchart
+356,849 Patients in Datasets
+-> 8809 <18yo
+-> 346,736 with no acidosis 
+-> 279 with SOFA <4
+-> 99 with Lactate <2
+926 Patiens included
+-> 611 with respiratoy acidosis
+-> 0 with ketosis
+-> 69 with >1.5L Volume loss
+-> 0 Patients with prior RRT 
+-> 0 Patients with CKD, 5 Patiens with eGFR<30
+241 Patients used in analysis 
 
 ## TODO : 
 - cohort size very small after selection of acidosis criteria ? is there an error ?
