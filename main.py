@@ -18,4 +18,5 @@ print(f"Unajusted Regression : {unajusted_regression["tau"]}, p={unajusted_regre
 print(f"Ajusted Regression : {ajusted_regression["tau"]}, p={ajusted_regression["p_value"]}, CI95=[{ajusted_regression["ci_low"]}, {ajusted_regression["ci_high"]}]")
 print(f"Prosperity IPW : ATE={prosperity["ate"]}, p={prosperity["p_value"]}, CI95=[{prosperity["ci_low"]}, {prosperity["ci_high"]}]")
 print(f"Kaplan Meier : medium survival (exposed) = {km_results["exposed_medium_survival"]}, medium survival (control) = {km_results["control_medium_survival"]}, p(LogRank)={km_results["log_rank_p_value"]}")
-km_results["figure"].show()
+
+km_results["figure"].savefig("Kaplan_Meier.png")

@@ -55,7 +55,7 @@ def include_adults(patient_information: pl.LazyFrame, medications: pl.LazyFrame,
     
 # Severe acidemia within 48hrs of ICU admission
 # (pH≤7.20, paCO2≤45mmHg, HCO3 ≤ 20 mmol/L)
-# TODO: Check for pH Carbon dioxide and Bicarbonate in different timeframes before 48h for the same patient !!
+# THis function is replaced by the one below checking for acidosis with CO2 and CHO3 at any time, since was to restrictive
 @my_cohort_pipe_element(debug="Severe acidemia in 48h of admission in one lab")
 def include_severe_acidemia_in_48h_one_lab(patient_information: pl.LazyFrame, medications: pl.LazyFrame, diagnoses:pl.LazyFrame, procedures:pl.LazyFrame, microbiology: pl.LazyFrame, ts_labs: pl.LazyFrame, ts_vitals:pl.LazyFrame, ts_respiratory:pl.LazyFrame, ts_intake_output:pl.LazyFrame) :
     # Apply inclusion criteria 
@@ -150,11 +150,8 @@ def exclude_prior_RRT(patient_information: pl.LazyFrame, medications: pl.LazyFra
     # MEANWHILE : 
     # first time of acidosis : 
     first_acidosis_time = ts_labs.filter(
-        pl.col("pH").is_not_null() & pl.col("Carbon dioxide").is_not_null() & pl.col("Bicarbonate").is_not_null() &
         (pl.col("Time Relative to Admission (seconds)") <= 48 * 3600) &
-        (pl.col("pH").struct.field("value") <= 7.2) &
-        (pl.col("Carbon dioxide").struct.field("value") <= 45) &
-        (pl.col("Bicarbonate").struct.field("value") <= 20)
+        (pl.col("pH").struct.field("value") <= 7.2)
     ).group_by("Global ICU Stay ID").agg(pl.col("Time Relative to Admission (seconds)").min().alias("First Acidosis Time"))
 
     # select RRT
@@ -210,11 +207,8 @@ def exclude_CKD_AKI_GFR_sub30(patient_information: pl.LazyFrame, medications: pl
     
     ## time of acidois
     first_acidosis_time = ts_labs.filter(
-        pl.col("pH").is_not_null() & pl.col("Carbon dioxide").is_not_null() & pl.col("Bicarbonate").is_not_null() &
         (pl.col("Time Relative to Admission (seconds)") <= 48 * 3600) &
-        (pl.col("pH").struct.field("value") <= 7.2) &
-        (pl.col("Carbon dioxide").struct.field("value") <= 45) &
-        (pl.col("Bicarbonate").struct.field("value") <= 20)
+        (pl.col("pH").struct.field("value") <= 7.2)
     ).group_by("Global ICU Stay ID").agg(pl.col("Time Relative to Admission (seconds)").min().alias("First Acidosis Time"))
     #print(f"Patients with acidosis before ICU : {first_acidosis_time.filter(pl.col("First Acidosis Time") < 0).select("Global ICU Stay ID").unique().collect().to_series().len()}")
 
