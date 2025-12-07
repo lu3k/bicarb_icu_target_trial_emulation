@@ -24,6 +24,7 @@ Use analyse.py to perform analysis.
 - Ketones do not have a defined value
 - Volume Intake, Outtake function are unclear in inclusion 
 - RRT in diagnosis Frame do not have a Global ICU Stay ID. Imputing them with the Global Hospital Stay ID doesn't include all patients / shouldn't be a problem, since all patients with a ICU stay ID that fall into this case are eliminated.
+- Problem with ReprodICU where there are lots of labs with no patient_info and vice versa. See undefined_labs_problem_analysis.ipynb for details. 
 
 ## Current Cohort Flowchart
 356,849 Patients in Datasets

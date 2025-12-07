@@ -74,6 +74,7 @@ def include_severe_acidemia_in_48h(patient_information: pl.LazyFrame, medication
         (pl.col("Time Relative to Admission (seconds)") <= 48 * 3600) &
         (pl.col("pH").struct.field("value") <= 7.2)
     ).filter(
+        # Second filter to consider only the labs <48h 
         (pl.col("Carbon dioxide").struct.field("value") <= 45).any().over("Global ICU Stay ID") &
         (pl.col("Bicarbonate").struct.field("value") <= 20).any().over("Global ICU Stay ID")
     )
