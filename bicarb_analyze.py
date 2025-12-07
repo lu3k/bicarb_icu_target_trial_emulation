@@ -6,6 +6,8 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from lifelines import KaplanMeierFitter
+from lifelines.statistics import logrank_test
 
 def load_data():
     print(f"[Cohort] Loading Cohort data ...")
@@ -170,7 +172,7 @@ def outcome(patient_info, meds, ts_labs, ts_vitals, ts_respiratory):
     )
     print(f"{composition_outcome.select("Global ICU Stay ID").unique().collect().to_series().len()} patients do fit the outcome criteria. ")
 
-    return composition_outcome.select("Global ICU Stay ID").unique()
+    return composition_outcome.select("Global ICU Stay ID", "death_rel_to_inclusion")
 
 def select_patients(selection_lf:pl.Series, patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output):
     return tuple([
@@ -237,6 +239,41 @@ def propensity_score_ipw_ate(treatment, outcome, confounders):
         "ci_high": wls.conf_int(alpha=0.05)[1][1]
     }
 
+def kaplan_meier(df):
+    pd_df = df.to_pandas()
+
+    exposed = pd_df[pd_df["Exposure"] == 1]
+    control = pd_df[pd_df["Exposure"] == 0]
+
+    kaplan_meier_exposed = KaplanMeierFitter()
+    kaplan_meier_control = KaplanMeierFitter()
+
+    kaplan_meier_exposed.fit(exposed["death_rel_to_inclusion"], exposed["death_event"], label="Exposed")
+    kaplan_meier_control.fit(control["death_rel_to_inclusion"], control["death_event"], label="Control")
+
+    ax = kaplan_meier_exposed.plot_survival_function()
+    kaplan_meier_control.plot_survival_function(ax=ax)
+
+    
+
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Survival probability")
+
+    print("Median survival (Exposed):", kaplan_meier_exposed.median_survival_time_)
+    print("Median survival (Control):", kaplan_meier_control.median_survival_time_)
+
+    # Log-rank test (difference between curves)
+    res = logrank_test(
+        exposed["death_rel_to_inclusion"], control["death_rel_to_inclusion"],
+        event_observed_A=exposed["death_event"],
+        event_observed_B=control["death_event"]
+    )
+
+    fig = ax.get_figure()
+    fig.savefig("kaplan_meier.png")
+
+    print("Log-rank p-value:", res.p_value)
+
 if __name__ == "__main__":
     patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output = load_data()
 
@@ -272,7 +309,7 @@ if __name__ == "__main__":
             .otherwise(None)
         ).alias("Exposure"),
         (
-            pl.when(pl.col("Global ICU Stay ID").is_in(outcome_patients.collect().to_series()))
+            pl.when(pl.col("Global ICU Stay ID").is_in(outcome_patients.select("Global ICU Stay ID").collect().to_series()))
             .then(1)
             .otherwise(0)
         ).alias("Outcome")
@@ -296,8 +333,24 @@ if __name__ == "__main__":
     
     confounders_np = outcome_df.select([pl.col(column) for column in outcome_df.columns if column not in ["Global ICU Stay ID", "Outcome", "Exposure"]]).to_numpy()
 
-    #print(confounders_np)
+    
+    # 
+    time_outcome_lf = patient_information.select(
+        pl.col("Global ICU Stay ID")
+    ).join(outcome_patients, on="Global ICU Stay ID", how="left").with_columns([
+        (
+            pl.when(pl.col("death_rel_to_inclusion").is_not_null())
+            .then(1)
+            .otherwise(0)
+        ).alias("death_event"),
+        pl.col("death_rel_to_inclusion").fill_null(pl.lit(28)), # if not death then follow up finished at 28d 
+        (
+            pl.when(pl.col("Global ICU Stay ID").is_in(exposure.collect().to_series()))
+            .then(1)
+            .when(pl.col("Global ICU Stay ID").is_in(control.collect().to_series()))
+            .then(0)
+            .otherwise(None)
+        ).alias("Exposure")
+    ])
 
-    #print(unajusted_regression(exposure_np, outcome_np))
-    x = propensity_score(exposure_np, outcome_np, confounders_np)
-    print(x)
+    kaplan_meier(time_outcome_lf.collect())
