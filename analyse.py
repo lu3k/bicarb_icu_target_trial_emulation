@@ -51,7 +51,7 @@ def propensity_score_ipw_ate(treatment, outcome, confounders):
     wls = sm.WLS(outcome, x, weights=weight).fit(cov_type="HC3")
     return {
         "ate": wls.params[1],
-        "p-value" : wls.pvalues[1],
+        "p_value" : wls.pvalues[1],
         "ci_low": wls.conf_int(alpha=0.05)[1][0],
         "ci_high": wls.conf_int(alpha=0.05)[1][1]
     }
@@ -72,9 +72,6 @@ def kaplan_meier(pd_df):
     ax.set_xlabel("Time (days)")
     ax.set_ylabel("Survival probability")
 
-    print("Median survival (Exposed):", kaplan_meier_exposed.median_survival_time_)
-    print("Median survival (Control):", kaplan_meier_control.median_survival_time_)
-
     # Log-rank test (difference between curves)
     res = logrank_test(
         exposed["time_to_follow_up_event_rel_to_inclusion"], control["time_to_follow_up_event_rel_to_inclusion"],
@@ -82,7 +79,9 @@ def kaplan_meier(pd_df):
         event_observed_B=control["cumulative_outcome"]
     )
 
-    fig = ax.get_figure()
-    fig.savefig("kaplan_meier.png")
-
-    print("Log-rank p-value:", res.p_value)
+    return {
+        "exposed_medium_survival" : kaplan_meier_exposed.median_survival_time_,
+        "control_medium_survival" : kaplan_meier_control.median_survival_time_,
+        "log_rank_p_value": res.p_value,
+        "figure": ax.get_figure()
+    }

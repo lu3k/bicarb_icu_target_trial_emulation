@@ -37,22 +37,29 @@ ts_vitals = pl.scan_parquet(path / "ts_vitals.parquet")
 ts_respiratory = pl.scan_parquet(path / "ts_respiratory.parquet")
 ts_intake_output = pl.scan_parquet(path / "ts_intake_output.parquet")
 
+
 # Add inclusion time // we can use inner join, beacause all included patients should have a time defined
 patient_information = patient_information.join(
     get_inclusion_time(ts_labs),
     on="Global ICU Stay ID",
     how="inner"
 )
+
 # Add bicarb exposure 
 _bicarb_exposure = get_bicarb_exposure(medications)
+#print(_bicarb_exposure.collect())
 patient_information = patient_information.with_columns([
     pl.when(pl.col("Global ICU Stay ID").is_in(_bicarb_exposure.select("Global ICU Stay ID").unique().collect().to_series()))
     .then(pl.lit(1))
     .otherwise(pl.lit(0))
     .alias("bicarb_exposure")
 ])
+
 # Bicarb exposure within 24h of inclusion ? 
-_bicarb_exposure = _bicarb_exposure.join(
+_bicarb_exposure = _bicarb_exposure.filter(
+    # Only get first bicarb administration
+    pl.col("Drug Start Relative to Admission (seconds)") == pl.col("Drug Start Relative to Admission (seconds)").min().over("Global ICU Stay ID")
+).join(
     patient_information.select("Global ICU Stay ID", "first_acidosis_time"), on="Global ICU Stay ID"
 ).with_columns(
     # Calculate the Drug start time relative to first acidosis
@@ -60,7 +67,9 @@ _bicarb_exposure = _bicarb_exposure.join(
 ).with_columns([
     # Check if is < 24h
     pl.when(pl.col("drug_start_rel_to_inclusion") <= 24*3600).then(1).otherwise(0).alias("exposed_in_24h"),
-])
+]).select("Global ICU Stay ID", "drug_start_rel_to_inclusion", "exposed_in_24h").unique()
+#print(_bicarb_exposure.collect())
+
 # Add info to patient // use left since some are not defined
 patient_information = patient_information.join(
     _bicarb_exposure.select("Global ICU Stay ID", "drug_start_rel_to_inclusion", "exposed_in_24h"), on="Global ICU Stay ID", how="left"
@@ -68,6 +77,7 @@ patient_information = patient_information.join(
     # If null patient was not at all exposed, so set to 0 
     pl.col("exposed_in_24h").fill_null(0)
 )
+
 
 # Add FOLLOWUP events :
 # Assessing organ failure at day 7 and mortality at day 28 or discharge (whichever comes sooner)
