@@ -1,7 +1,11 @@
-import reprodICU
 import polars as pl
 from pathlib import Path
 import sofa_helper
+import statsmodels.api as sm 
+import numpy as np 
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
 def load_data():
     print(f"[Cohort] Loading Cohort data ...")
@@ -166,6 +170,8 @@ def outcome(patient_info, meds, ts_labs, ts_vitals, ts_respiratory):
     )
     print(f"{composition_outcome.select("Global ICU Stay ID").unique().collect().to_series().len()} patients do fit the outcome criteria. ")
 
+    return composition_outcome.select("Global ICU Stay ID").unique()
+
 def select_patients(selection_lf:pl.Series, patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output):
     return tuple([
         patient_information.filter(pl.col("Global ICU Stay ID").is_in(selection_lf)),
@@ -179,6 +185,58 @@ def select_patients(selection_lf:pl.Series, patient_information, medications, di
         ts_intake_output.filter(pl.col("Global ICU Stay ID").is_in(selection_lf))])
 
 
+## ------------- ANALASIS FUNCTIONS -------------
+def encode_hot_ones(lf, cols):
+    categorial_cols = [c for c, dt in zip(lf.columns, lf.dtypes) if c in cols and dt in (pl.Utf8, pl.Categorical, pl.Enum)]
+    if categorial_cols:
+        return lf.collect().to_dummies(columns=categorial_cols)
+    return lf.collect()
+
+
+def unajusted_regression(treatment, outcome):
+    X = sm.add_constant(treatment)
+
+    model = sm.OLS(outcome, X).fit(cov_type="HC3")
+
+    return{
+        "tau": model.params[1],
+        "p_value": model.pvalues[1],
+        "ci_low": model.conf_int(alpha=0.05)[1][0],
+        "ci_high": model.conf_int(alpha=0.05)[1][1]
+    }
+
+
+def ajusted_regression(treatment, outcome, confounders):
+    X = sm.add_constant(np.column_stack((treatment, confounders)))
+
+    model = sm.OLS(outcome, X).fit(cov_type="HC3")
+
+    return{
+        "tau": model.params[1],
+        "p_value": model.pvalues[1],
+        "ci_low": model.conf_int(alpha=0.05)[1][0],
+        "ci_high": model.conf_int(alpha=0.05)[1][1]
+    }
+
+def propensity_score_ipw_ate(treatment, outcome, confounders):
+    ps_model = Pipeline([
+        ("scaler", StandardScaler(with_mean=False)),
+        ("lr", LogisticRegression(max_iter=2000))
+    ])
+    ps_model.fit(confounders, treatment)
+    ps = ps_model.predict_proba(confounders)[:, 1]
+    ps = np.clip(ps, .01, .99)
+    weight = np.where(treatment == 1, 1/ps, 1/(1-ps))
+
+    x = sm.add_constant(treatment)
+    wls = sm.WLS(outcome, x, weights=weight).fit(cov_type="HC3")
+    return {
+        "ate": wls.params[1],
+        "p-value" : wls.pvalues[1],
+        "ci_low": wls.conf_int(alpha=0.05)[1][0],
+        "ci_high": wls.conf_int(alpha=0.05)[1][1]
+    }
+
 if __name__ == "__main__":
     patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output = load_data()
 
@@ -190,11 +248,56 @@ if __name__ == "__main__":
     print(f"{control.select("Global ICU Stay ID").unique().collect().to_series().len()} patients in casual contrast groupe.")
 
 
-    exposure_patient_information, exposure_medications, exposure_diagnoses, exposure_procedures, exposure_microbiology, exposure_ts_labs, exposure_ts_vitals, exposure_ts_respiratory, exposure_ts_intake_output = select_patients(exposure.select("Global ICU Stay ID").collect().to_series(), patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output)
-    control_patient_information, control_medications, control_diagnoses, control_procedures, control_microbiology, control_ts_labs, control_ts_vitals, control_ts_respiratory, control_ts_intake_output = select_patients(control.select("Global ICU Stay ID").collect().to_series(), patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output)
+    #exposure_patient_information, exposure_medications, exposure_diagnoses, exposure_procedures, exposure_microbiology, exposure_ts_labs, exposure_ts_vitals, exposure_ts_respiratory, exposure_ts_intake_output = select_patients(exposure.select("Global ICU Stay ID").collect().to_series(), patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output)
+    #control_patient_information, control_medications, control_diagnoses, control_procedures, control_microbiology, control_ts_labs, control_ts_vitals, control_ts_respiratory, control_ts_intake_output = select_patients(control.select("Global ICU Stay ID").collect().to_series(), patient_information, medications, diagnoses, procedures, microbiology, ts_labs, ts_vitals, ts_respiratory, ts_intake_output)
     
-    print("Exposure groupe : ")
-    outcome(exposure_patient_information, exposure_medications, exposure_ts_labs, exposure_ts_vitals, exposure_ts_respiratory)
-    print("Control groupe : ")
-    outcome(control_patient_information, control_medications, control_ts_labs, control_ts_vitals, control_ts_respiratory)
+    #print("Exposure groupe : ")
+    #exposure_outcome_patients = outcome(exposure_patient_information, exposure_medications, exposure_ts_labs, exposure_ts_vitals, exposure_ts_respiratory)
+    #print("Control groupe : ")
+    #control_outcome_patients = outcome(control_patient_information, control_medications, control_ts_labs, control_ts_vitals, control_ts_respiratory)
 
+    outcome_patients = outcome(patient_information, medications, ts_labs, ts_vitals, ts_respiratory)
+
+    confounders_columns = ["Admission Age (years)", "Admission Weight (kg)"]
+
+    outcome_lf = patient_information.select(
+            [pl.col("Global ICU Stay ID")] + 
+            [pl.col(column) for column in confounders_columns]
+        ).with_columns([
+        (
+            pl.when(pl.col("Global ICU Stay ID").is_in(exposure.collect().to_series()))
+            .then(1)
+            .when(pl.col("Global ICU Stay ID").is_in(control.collect().to_series()))
+            .then(0)
+            .otherwise(None)
+        ).alias("Exposure"),
+        (
+            pl.when(pl.col("Global ICU Stay ID").is_in(outcome_patients.collect().to_series()))
+            .then(1)
+            .otherwise(0)
+        ).alias("Outcome")
+    ])
+    # Test quality of groupe
+    if outcome_lf.filter(pl.col("Exposure").is_null()).select("Global ICU Stay ID").collect().to_series().len() > 0: 
+        raise ValueError("There are patients not in exposure or control groupe in the dataset !")
+    #print(outcome_lf.collect()) 
+
+    outcome_lf = outcome_lf.filter(pl.col("Admission Weight (kg)").is_not_null())
+        
+
+    # Get hot ones on categorial columns
+    outcome_df = encode_hot_ones(outcome_lf, confounders_columns)
+
+    #print(outcome_df)
+
+    print("Performing analysis...")
+    outcome_np = outcome_df.select("Outcome").to_numpy().ravel()
+    exposure_np = outcome_df.select("Exposure").to_numpy().ravel()
+    
+    confounders_np = outcome_df.select([pl.col(column) for column in outcome_df.columns if column not in ["Global ICU Stay ID", "Outcome", "Exposure"]]).to_numpy()
+
+    #print(confounders_np)
+
+    #print(unajusted_regression(exposure_np, outcome_np))
+    x = propensity_score(exposure_np, outcome_np, confounders_np)
+    print(x)
