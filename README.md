@@ -44,3 +44,17 @@ Use analyse.py to perform analysis.
 - cohort size very small after selection of acidosis criteria ? is there an error ?
 - SOFA and eGFG data calculated based on "homemade" model, not the reprodICU standard. (doesn't compile on my computer)
 - Rebuild as original study 
+
+TODO Maxime : 
+- Flowchart 
+- Amsterdam 
+- Relance Physio 
+- DL MARS
+
+Changes Moritz : 
+- acidoses same row 
+- ketones > 4 
+- Volume loss !!= 
+- not eGFR ? 
+-  
+
