@@ -23,6 +23,7 @@ Use analyse.py to perform analysis.
 - Volume Intake, Outtake function are unclear in inclusion 
 - Some patients negative inclusion time time, before icu admission 
 - SOFA Helper doesnt calaculate sofa for all patients (missing params)
+- ALL RRT is after inclusion ? No time data ?
 
 ## Current Cohort Flowchart
 see inclusion_exclusion ipynb
