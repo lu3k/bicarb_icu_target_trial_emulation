@@ -49,20 +49,20 @@ acidemia_any_lab = ts_labs.filter(
 inclusion_time_any_lab = acidemia_any_lab.group_by("Global ICU Stay ID").agg(pl.col("Time Relative to Admission (seconds)").min().alias("inclusion_time_seconds_any_lab"))
 inclusion_time_one_lab = acidemia_one_lab.group_by("Global ICU Stay ID").agg(pl.col("Time Relative to Admission (seconds)").min().alias("inclusion_time_seconds_one_lab"))
 
-def build_criteria_table(inclusion_time, col_name):
-    sofa = sofa_helper.calc_sofa(patient_information, ts_vitals, medications, ts_labs, ts_respiratory)
+def build_criteria_table(inclusion_time, inclusion_time_col_name):
+    sofa = sofa_helper.get_sofa(patient_information, ts_vitals, medications, ts_labs, ts_respiratory)
     sofa = sofa.rename({"id" : "Global ICU Stay ID"})
     # SOFA at any time 
     sofa_at_any_time = sofa.filter(pl.col("sofa") >= 4)
     # SOFA upto inclusion time
     sofa_upto_inclusion_time = sofa.join(inclusion_time, on="Global ICU Stay ID", how="inner").filter(pl.col("sofa") >= 4).filter(
-        pl.col("time") <= pl.col(col_name)
+        pl.col("time") <= pl.col(inclusion_time_col_name)
         )
     # SOFA 48h to inclusion event
     sofa_48h_to_inclusion = sofa.join(inclusion_time, on="Global ICU Stay ID", how="inner").filter(
         (pl.col("sofa") >= 4) &
-        (pl.col("time") >= (pl.col(col_name) - 48 * 3600)) &
-        (pl.col("time") <= pl.col(col_name))
+        (pl.col("time") >= (pl.col(inclusion_time_col_name) - 48 * 3600)) &
+        (pl.col("time") <= pl.col(inclusion_time_col_name))
     )
 
     # Lactate over 2 at any time
@@ -70,13 +70,13 @@ def build_criteria_table(inclusion_time, col_name):
     # Lactate upto inclusion time 
     lactate_upto_inclusion = ts_labs.join(inclusion_time, on="Global ICU Stay ID", how="inner").filter(
         (pl.col("Lactate").struct.field("value") >= 2) &
-        (pl.col("Time Relative to Admission (seconds)") <= pl.col(col_name))
+        (pl.col("Time Relative to Admission (seconds)") <= pl.col(inclusion_time_col_name))
     )
     # Lactate 48h to inclusion time
     lactate_48h_to_inclusion = ts_labs.join(inclusion_time, on="Global ICU Stay ID", how="inner").filter(
         (pl.col("Lactate").struct.field("value") >= 2) &
-        (pl.col("Time Relative to Admission (seconds)") >= (pl.col(col_name) - 48 * 3600)) &
-        (pl.col("Time Relative to Admission (seconds)") <= pl.col(col_name))
+        (pl.col("Time Relative to Admission (seconds)") >= (pl.col(inclusion_time_col_name) - 48 * 3600)) &
+        (pl.col("Time Relative to Admission (seconds)") <= pl.col(inclusion_time_col_name))
     )
 
     ####### EXCLUSION CRITERIA ########
@@ -117,7 +117,7 @@ def build_criteria_table(inclusion_time, col_name):
 
     rrt_at_any_time = rrt_lf.select("Global ICU Stay ID").unique()
     rrt_upto_inclusion = rrt_lf.join(inclusion_time, on="Global ICU Stay ID", how="inner").filter(
-        pl.col("Procedure Start Relative to Admission (seconds)") <= pl.col(col_name)
+        pl.col("Procedure Start Relative to Admission (seconds)") <= pl.col(inclusion_time_col_name)
     )
 
     # Diagnosed CKD Stage 4 (N18.4, N18.5), AKI (N17.-) or GFR <30 at time of acidosis
@@ -132,7 +132,7 @@ def build_criteria_table(inclusion_time, col_name):
         inclusion_time, on="Global ICU Stay ID", how="inner"
     ).filter(
         # Either before inclusion time
-        (pl.col("Diagnosis Start Relative to Admission (seconds)") <= pl.col(col_name))
+        (pl.col("Diagnosis Start Relative to Admission (seconds)") <= pl.col(inclusion_time_col_name))
         # OR assuming that if diagnosis time is missing, it was present at admission
         | pl.col("Diagnosis Start Relative to Admission (seconds)").is_null()
     )
@@ -143,7 +143,7 @@ def build_criteria_table(inclusion_time, col_name):
         on="Global ICU Stay ID",
         how="inner"
     ).filter(
-        pl.col("Time Relative to Admission (seconds)") <= pl.col(col_name)
+        pl.col("Time Relative to Admission (seconds)") <= pl.col(inclusion_time_col_name)
     )
 
     # Table with columns defining inclusion creteria
@@ -175,10 +175,63 @@ def build_criteria_table(inclusion_time, col_name):
             .alias(name)
         ])
 
+
+    ####### ADD FOLLOW-UP / OUTCOME CRITERIA ########
+    # TODO : Add organ failure
+    follow_up = patient_information.join(inclusion_time, on="Global ICU Stay ID", how="inner")
+    follow_up = follow_up.with_columns(
+        # Death time or discharge time relative to inclusion time (since death is also the end of hosptialisation):
+        # (Pre-ICU Length of Stay + time_to_inclusion) = Inclusion time relative to hospitalisation start
+        # Hospital Length of stay - inclusion rel to hospitalisation start = time to death relative to inclusion 
+        (pl.when(pl.col("Mortality in Hospital")).then(pl.lit("death")).otherwise(pl.lit("discharge"))).alias("follow_up_event"),
+        (pl.col("Hospital Length of Stay (days)") - pl.col("Pre-ICU Length of Stay (days)") - pl.col(inclusion_time_col_name)/(3600*24)).alias("time_to_follow_up_event_rel_to_inclusion")
+    ).select("Global ICU Stay ID", "follow_up_event", "time_to_follow_up_event_rel_to_inclusion")
+
+    CRITERIA_TABLE = CRITERIA_TABLE.join(follow_up, on="Global ICU Stay ID", how="left")
+
+    ### OUTCOME CRITERIA ###
+    calc_delta = lambda col_name : (pl.col(col_name) - pl.col(col_name).sort_by("time").drop_nulls().first().over("Global ICU Stay ID")).alias(f"{col_name}_delta_to_inclusion")
+    compare_delta = lambda col_name : ((pl.col(f"{col_name}_delta_to_inclusion") >= 2) | ((pl.col(f"{col_name}_delta_to_inclusion") >= 2) & (pl.col(col_name).sort_by("time").drop_nulls().first().over("Global ICU Stay ID") == 3))).alias(f"{col_name}_sig_increase")
+    sofa_sig_increase = sofa.join(
+        inclusion_time,
+        on="Global ICU Stay ID",
+        how="inner"
+    ).filter(
+        pl.col("time") >= pl.col(inclusion_time_col_name)
+    ).with_columns(
+        [calc_delta(sofa) for sofa in ["sofa_coag", "sofa_liver", "sofa_renal", "sofa_cardio", "sofa_resp"]]
+    ).with_columns(
+        [compare_delta(sofa) for sofa in ["sofa_coag", "sofa_liver", "sofa_renal", "sofa_cardio", "sofa_resp"]]
+    ).fill_null(False).filter(
+        pl.col("sofa_coag_sig_increase") |
+        pl.col("sofa_liver_sig_increase") |
+        pl.col("sofa_renal_sig_increase") |
+        pl.col("sofa_cardio_sig_increase") |
+        pl.col("sofa_resp_sig_increase")
+    ).filter(
+        pl.col("time") == pl.col("time").min().over("Global ICU Stay ID")
+    ).rename({
+        "time" : "sofa_increase_rel_to_inclusion"
+    }).select("Global ICU Stay ID", "sofa_increase_rel_to_inclusion")
+
+    CRITERIA_TABLE = CRITERIA_TABLE.join(sofa_sig_increase, on="Global ICU Stay ID", how="left")
+    CRITERIA_TABLE = CRITERIA_TABLE.with_columns(
+        (pl.col("sofa_increase_rel_to_inclusion") <= 28 * 3600 * 24).alias("sofa_increase_in_28d").fill_null(False),
+        ((pl.col("follow_up_event") == "death") & (pl.col("time_to_follow_up_event_rel_to_inclusion") <= 28)).alias("death_in_28d")
+    )
+    CRITERIA_TABLE = CRITERIA_TABLE.with_columns(
+        (pl.col("sofa_increase_in_28d") & pl.col("death_in_28d")).alias("death_and_sofa_increase_28d")
+    )
+    CRITERIA_TABLE = CRITERIA_TABLE.with_columns(
+        pl.col("sofa_increase_in_28d").cast(pl.Int8),
+        pl.col("death_in_28d").cast(pl.Int8),
+        pl.col("death_and_sofa_increase_28d").cast(pl.Int8),
+    )
+
     return CRITERIA_TABLE.join(inclusion_time, on="Global ICU Stay ID", how="left")
 
-any_lab_criteria_table = build_criteria_table(inclusion_time_any_lab, "inclusion_time_seconds_any_lab")
+#any_lab_criteria_table = build_criteria_table(inclusion_time_any_lab, "inclusion_time_seconds_any_lab")
 one_lab_criteria_table = build_criteria_table(inclusion_time_one_lab, "inclusion_time_seconds_one_lab")
 
-any_lab_criteria_table.sink_parquet("inclusion_exclusion_criteria_table_any_lab.parquet")
+#any_lab_criteria_table.sink_parquet("inclusion_exclusion_criteria_table_any_lab.parquet")
 one_lab_criteria_table.sink_parquet("inclusion_exclusion_criteria_table_one_lab.parquet")

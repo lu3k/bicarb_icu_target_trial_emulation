@@ -1,6 +1,8 @@
 import polars as pl
 import reprodICU
 
+import sofa_helper
+
 patient_information = reprodICU.patient_information
 medications = reprodICU.medications
 diagnoses = reprodICU.diagnoses
@@ -100,7 +102,6 @@ LOOSE_ANALYSIS_TABLE, loose_flowchart = filter_analysis_table(ANALYSIS_TABLE, lo
 STRICT_ANALYSIS_TABLE, strict_flowchart = filter_analysis_table(ANALYSIS_TABLE, strict_inclusion_criteria, strict_exclusion_criteria)
 
 
-
 if __name__ == "__main__":
 
     print("Looser Inclusion / Exclusion Criteria Flowchart:")
@@ -112,7 +113,5 @@ if __name__ == "__main__":
     print("Stricter Inclusion / Exclusion Criteria Flowchart:")
     print(get_flowchart(strict_flowchart))
     print("Explosed patients in 24h:", STRICT_ANALYSIS_TABLE.filter(pl.col("exposed_in_24h") == True).height)
-
-
 
 

@@ -21,24 +21,23 @@ Use analyse.py to perform analysis.
 
 ## Current problems 
 - Volume Intake, Outtake function are unclear in inclusion 
-- Inclusion time is defined on any lab value not on current based on chosen model. 
+- Some patients negative inclusion time time, before icu admission 
+- SOFA Helper doesnt calaculate sofa for all patients (missing params)
 
 ## Current Cohort Flowchart
 see inclusion_exclusion ipynb
 
 ## TODO : 
 - SOFA and eGFG data calculated based on "homemade" model, not the reprodICU standard. (doesn't compile on my computer)
+- Recreate the tables in the original study 
 
 TODO Maxime : 
 - Flowchart 
-- Amsterdam 
-- Relance Physio 
 - DL MARS
 
 Changes Moritz : 
-- acidoses same row 
-- ketones > 4 
-- Volume loss !!= 
-- not eGFR ? 
--  
+- acidoses same row +
+- ketones > 4 +
+- Volume loss !!= + 
+- not eGFR ? +
 

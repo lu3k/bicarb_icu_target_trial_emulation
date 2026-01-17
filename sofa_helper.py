@@ -1,4 +1,7 @@
 import polars as pl
+from pathlib import Path
+
+SOFA_PARQUET_PATH = "sofa_scores.parquet"
 
 def calc_sofa_coag(labs):
     return labs.with_columns(
@@ -262,3 +265,42 @@ def calc_sofa(patients:pl.LazyFrame, vitals:pl.LazyFrame, meds:pl.LazyFrame, lab
             pl.sum_horizontal(["sofa_coag", "sofa_liver", "sofa_renal", "sofa_cardio", "sofa_resp"]).alias("sofa")
         )
 
+def get_sofa(patients:pl.LazyFrame, vitals:pl.LazyFrame, meds:pl.LazyFrame, labs:pl.LazyFrame, respiratory:pl.LazyFrame) -> pl.LazyFrame:
+    if Path(SOFA_PARQUET_PATH).exists():
+        try : 
+            sofa_scores = pl.read_parquet(SOFA_PARQUET_PATH)
+            # if all patients are already calculated, return
+            existing_ids = set(sofa_scores.select(pl.col("id")).unique().to_series().to_list())
+            patient_ids = set(patients.select(pl.col("Global ICU Stay ID")).unique().collect().to_series().to_list())
+
+            print(f"[SOFA Helper] Existing SOFA scores for {len(existing_ids)} patients found.")
+            print(f"[SOFA Helper] Requested SOFA scores for {len(patient_ids)} patients.")
+
+
+            if patient_ids.issubset(existing_ids):
+                print("[SOFA Helper] Using existing SOFA scores from parquet.")
+                return sofa_scores.lazy()
+        except Exception as e:
+            print(f"[SOFA Helper] Error reading existing SOFA parquet file: {e}")
+
+    print("[SOFA Helper] Calculating SOFA scores...")
+    sofa_scores = calc_sofa(patients, vitals, meds, labs, respiratory)
+    sofa_scores.sink_parquet(SOFA_PARQUET_PATH)
+    return sofa_scores
+
+if __name__ == "__main__":
+    print("Creating Sofa score for all patients...")
+    import reprodICU
+
+    patient_information = reprodICU.patient_information
+    medications = reprodICU.medications
+    ts_labs = reprodICU.timeseries_labs
+    ts_vitals = reprodICU.timeseries_vitals
+    ts_respiratory = reprodICU.timeseries_respiratory
+
+    ts_labs = ts_labs.with_columns(
+        pl.col("Global ICU Stay ID").str.replace(r"\.0$", "").alias("Global ICU Stay ID")
+    ) 
+
+
+    sofa = get_sofa(patient_information, ts_vitals, medications, ts_labs, ts_respiratory)
